@@ -132,6 +132,11 @@ pub fn build(b: *std.Build) !void {
 
     switch (sha1_backend) {
         .collision_detection => {
+            lib.addCSourceFiles(&util_hash_collision_detection_sources, &.{
+                "-DSHA1DC_NO_STANDARD_INCLUDES=1",
+                "-DSHA1DC_CUSTOM_INCLUDE_SHA1_C=\"git2_util.h\"",
+                "-DSHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C=\"git2_util.h\"",
+            });
             features.addValues(.{ .GIT_SHA1_COLLISIONDETECT = 1 });
         },
         .openssl => {
@@ -139,21 +144,30 @@ pub fn build(b: *std.Build) !void {
                 lib.linkSystemLibrary("ssl")
             else
                 lib.linkSystemLibrary("openssl");
+
+            // TODO: this is probably an option for openssl itself...
+            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
             features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
         },
         .openssl_dynamic => {
+            // TODO: this is probably an option for openssl itself...
+            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
+
             features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
             features.addValues(.{ .GIT_SHA1_OPENSSL_DYNAMIC = 1 });
             @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
         },
         .common_crypto => {
+            lib.addCSourceFiles(&util_hash_common_crypto_sources, &.{});
             features.addValues(.{ .GIT_SHA1_COMMON_CRYPTO = 1 });
         },
         .mbedTLS => {
+            lib.addCSourceFiles(&util_hash_mbedTLS_sources, &.{});
             features.addValues(.{ .GIT_SHA1_MBEDTLS = 1 });
             @panic("Todo: mbedTLS\n");
         },
         .win32 => {
+            lib.addCSourceFiles(&util_hash_win32_sources, &.{});
             features.addValues(.{ .GIT_SHA1_WIN32 = 1 });
         },
         .https => unreachable,
@@ -195,6 +209,7 @@ pub fn build(b: *std.Build) !void {
 
     switch (sha256_backend) {
         .builtin => {
+            lib.addCSourceFiles(&util_hash_builtin_sources, &.{});
             features.addValues(.{ .GIT_SHA256_BUILTIN = 1 });
         },
         .openssl => {
@@ -202,21 +217,29 @@ pub fn build(b: *std.Build) !void {
                 lib.linkSystemLibrary("ssl")
             else
                 lib.linkSystemLibrary("openssl");
+            // TODO: this is probably an option for openssl itself...
+            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
             features.addValues(.{ .GIT_SHA256_OPENSSL = 1 });
         },
         .openssl_dynamic => {
+            // TODO: this is probably an option for openssl itself...
+            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
+
             features.addValues(.{ .GIT_SHA256_OPENSSL = 1 });
             features.addValues(.{ .GIT_SHA256_OPENSSL_DYNAMIC = 1 });
             @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
         },
         .common_crypto => {
+            lib.addCSourceFiles(&util_hash_common_crypto_sources, &.{});
             features.addValues(.{ .GIT_SHA256_COMMON_CRYPTO = 1 });
         },
         .mbedTLS => {
+            lib.addCSourceFiles(&util_hash_mbedTLS_sources, &.{});
             features.addValues(.{ .GIT_SHA256_MBEDTLS = 1 });
             @panic("Todo: mbedTLS\n");
         },
         .win32 => {
+            lib.addCSourceFiles(&util_hash_win32_sources, &.{});
             features.addValues(.{ .GIT_SHA256_WIN32 = 1 });
         },
         .https => unreachable,
@@ -377,6 +400,8 @@ pub fn build(b: *std.Build) !void {
             lib.linkSystemLibrary("secur32");
 
             lib.addWin32ResourceFile(.{ .file = .{ .path = "src/libgit2/git2.rc" } });
+
+            lib.addCSourceFiles(&util_win32_sources, flags.items);
         },
         .solaris => {
             lib.linkSystemLibrary("socket");
@@ -389,7 +414,16 @@ pub fn build(b: *std.Build) !void {
         else => {},
     }
 
+    if (!target.isWindows()) {
+        lib.addCSourceFiles(&util_unix_sources, flags.items);
+
+        @panic("Todo: poll\n");
+        // check_symbol_exists(poll poll.h GIT_IO_POLL)
+        // check_symbol_exists(select sys/select.h GIT_IO_SELECT)
+    }
+
     lib.addConfigHeader(features);
+    lib.addCSourceFiles(&util_sources, flags.items);
     lib.addCSourceFiles(&libgit_sources, flags.items);
 
     lib.installHeadersDirectory("include", "git2");
@@ -540,15 +574,6 @@ const util_sources = [_][]const u8{
     "src/util/filebuf.c",
     "src/util/fs_path.c",
     "src/util/futils.c",
-    "src/util/hash/builtin.c",
-    "src/util/hash/collisiondetect.c",
-    "src/util/hash/common_crypto.c",
-    "src/util/hash/mbedtls.c",
-    "src/util/hash/openssl.c",
-    "src/util/hash/rfc6234/sha224-256.c",
-    "src/util/hash/sha1dc/sha1.c",
-    "src/util/hash/sha1dc/ubc_check.c",
-    "src/util/hash/win32.c",
     "src/util/hash.c",
     "src/util/net.c",
     "src/util/pool.c",
@@ -569,6 +594,28 @@ const util_sources = [_][]const u8{
     "src/util/vector.c",
     "src/util/wildmatch.c",
     "src/util/zstream.c",
+};
+
+const util_hash_collision_detection_sources = [_][]const u8{
+    "src/util/hash/collisiondetect.c",
+    "src/util/hash/sha1dc/sha1.c",
+    "src/util/hash/sha1dc/ubc_check.c",
+};
+const util_hash_openssl_sources = [_][]const u8{
+    "src/util/hash/openssl.c",
+};
+const util_hash_common_crypto_sources = [_][]const u8{
+    "src/util/hash/common_crypto.c",
+};
+const util_hash_mbedTLS_sources = [_][]const u8{
+    "src/util/hash/mbedtls.c",
+};
+const util_hash_win32_sources = [_][]const u8{
+    "src/util/hash/win32.c",
+};
+const util_hash_builtin_sources = [_][]const u8{
+    "src/util/hash/builtin.c",
+    "src/util/hash/rfc6234/sha224-256.c",
 };
 
 const util_win32_sources = [_][]const u8{
