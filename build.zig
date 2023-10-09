@@ -169,7 +169,6 @@ pub fn build(b: *std.Build) !void {
         /// Checks the HTTPS flag to determine backend
         https,
     };
-    // const sha256_backend = b.option(SHA256_Options, "sha256-backend", "") orelse .builtin;
     const sha256_backend = blk: {
         var sha = b.option(
             SHA256_Options,
@@ -252,7 +251,7 @@ pub fn build(b: *std.Build) !void {
     // SelectRegex.cmake
     // TODO: if unspecified, try using recomp_l, then pcre, then builtin
     const RegexOptions = enum { builtin, pcre, pcre2, regcomp, regcomp_l };
-    const regex_backend = b.option(RegexOptions, "regex-backend", "Change regex backend (default: builtin)") orelse .builtin;
+    const regex_backend = b.option(RegexOptions, "regex-backend", "Regular expression backend. (default: builtin)") orelse .builtin;
     switch (regex_backend) {
         .pcre => {
             lib.linkSystemLibrary("libpcre");
@@ -273,6 +272,8 @@ pub fn build(b: *std.Build) !void {
             features.addValues(.{ .GIT_REGEX_REGCOMP_L = 1 });
         },
         .builtin => {
+            // deps/pcre/CMakeLists.txt
+            // deps/pcre/config.h.in
             const pcre = b.addStaticLibrary(.{
                 .name = "pcre",
                 .target = target,
@@ -318,7 +319,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     // SelectXdiff.cmake
-    const xdiff_impl = b.option(enum { system, builtin }, "xdiff", "Choose xdiff implementation (default: builtin)") orelse .builtin;
+    const xdiff_impl = b.option(enum { system, builtin }, "xdiff", "Specifies the xdiff implementation (default: builtin)") orelse .builtin;
     switch (xdiff_impl) {
         .system => @panic("external/system xdiff is not yet supported\n"),
         .builtin => {
@@ -329,6 +330,32 @@ pub fn build(b: *std.Build) !void {
             // as errors for the xdiff sources until we've sorted them out
             lib.addCSourceFiles(&xdiff_sources, &.{ "-Wno-sign-compare", "-Wno-unused-parameter" });
             lib.addIncludePath(.{ .path = "deps/xdiff" });
+        },
+    }
+
+    // SelectHTTPParser.cmake
+    const http_parser_impl = b.option(enum { system, builtin }, "http-parser", "Specifies the HTTP Parser implementation (default: builtin)") orelse .builtin;
+    switch (http_parser_impl) {
+        .system => {
+            lib.linkSystemLibrary("http_parser");
+            @panic("Todo: include system http_parser headers\n");
+        },
+        .builtin => {
+            // deps/http_parser/CMakeLists.txt
+            const http_parser = b.addStaticLibrary(.{
+                .name = "http_parser",
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            });
+            http_parser.addIncludePath(.{ .path = "deps/http-parser" });
+            http_parser.addCSourceFile(.{
+                .file = .{ .path = "deps/http-parser/http_parser.c" },
+                .flags = &.{"-Wimplicit-fallthrough"},
+            });
+
+            lib.addIncludePath(.{ .path = "deps/http-parser" });
+            lib.linkLibrary(http_parser);
         },
     }
 
