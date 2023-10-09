@@ -422,6 +422,18 @@ pub fn build(b: *std.Build) !void {
         // check_symbol_exists(select sys/select.h GIT_IO_SELECT)
     }
 
+    if (b.option(
+        bool,
+        "multi-threaded",
+        "Use threads for parallel processing when possible (default: true)",
+    ) orelse true) {
+        if (!target.isWindows()) {
+            lib.linkSystemLibraryNeeded("Threads"); // TODO: is this even correct?
+        }
+
+        features.addValues(.{ .GIT_THREADS = 1 });
+    }
+
     lib.addConfigHeader(features);
     lib.addCSourceFiles(&util_sources, flags.items);
     lib.addCSourceFiles(&libgit_sources, flags.items);
