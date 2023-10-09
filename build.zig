@@ -226,13 +226,93 @@ pub fn build(b: *std.Build) !void {
     // SelectZlib.cmake
     // TODO: Not bothering to build chromium's zlib right now
     if (b.option(bool, "bundle-zlib", "Build the bundled version of zlib instead of linking the system one") orelse false) {
-        lib.addIncludePath(.{ .path = "deps/zlib" });
-        lib.addCSourceFiles(
+        const zlib = b.addStaticLibrary(.{
+            .name = "zlib",
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        zlib.addIncludePath(.{ .path = "deps/zlib" });
+        zlib.addCSourceFiles(
             &zlib_sources,
             &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
         );
+
+        lib.addIncludePath(.{ .path = "deps/zlib" });
+        lib.linkLibrary(zlib);
+        // lib.addIncludePath(.{ .path = "deps/zlib" });
+        // lib.addCSourceFiles(
+        //     &zlib_sources,
+        //     &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
+        // );
     } else {
         lib.linkSystemLibrary("zlib");
+    }
+
+    // SelectRegex.cmake
+    // TODO: if unspecified, try using recomp_l, then pcre, then builtin
+    const RegexOptions = enum { builtin, pcre, pcre2, regcomp, regcomp_l };
+    const regex_backend = b.option(RegexOptions, "regex-backend", "Change regex backend (default: builtin)") orelse .builtin;
+    switch (regex_backend) {
+        .pcre => {
+            lib.linkSystemLibrary("libpcre");
+            features.addValues(.{ .GIT_REGEX_PCRE = 1 });
+            @panic("Todo: include pcre headers\n");
+        },
+        .pcre2 => {
+            lib.linkSystemLibrary("libpcre2-8");
+            features.addValues(.{ .GIT_REGEX_PCRE2 = 1 });
+            @panic("Todo: pcre2\n");
+        },
+        .regcomp => {
+            // lib.linkSystemLibrary("regcomp"); // it's included in libc?
+            features.addValues(.{ .GIT_REGEX_REGCOMP = 1 });
+        },
+        .regcomp_l => {
+            // lib.linkSystemLibrary("regcomp_l"); // it's included in libc?
+            features.addValues(.{ .GIT_REGEX_REGCOMP_L = 1 });
+        },
+        .builtin => {
+            const pcre = b.addStaticLibrary(.{
+                .name = "pcre",
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            });
+            pcre.addIncludePath(.{ .path = "deps/pcre" });
+
+            // This doesn't really deserve it's own option,
+            // so you can change it here if you'd like.
+            const newline: enum { lf, cr, crlf, any, anycrlf } = .lf;
+            const PCRE_NEWLINE = "-DPCRE_NEWLINE=" ++ switch (newline) {
+                .lf => "10",
+                .cr => "13",
+                .crlf => "3338",
+                .any => "-1",
+                .anycrlf => "-2",
+            };
+
+            pcre.addCSourceFiles(&pcre_sources, &.{
+                "-Wno-unused-function",
+                "-Wno-implicit-fallthrough",
+                "-DSUPPORT_PCRE8=1",
+                "-DPCRE_LINK_SIZE=2",
+                "-DPCRE_PARENS_NEST_LIMIT=250",
+                "-DPCRE_MATCH_LIMIT=10000000",
+                "-DPCRE_MATCH_LIMIT_RECURSION=MATCH_LIMIT",
+                PCRE_NEWLINE,
+                "-DNO_RECURSE=1",
+                "-DPCRE_POSIX_MALLOC_THRESHOLD=10",
+                "-DBSR_ANYCRLF=0",
+                // TODO: deps/prce has a config.h.in, but just passing these
+                // as flags seems fine?
+                // "-DHAVE_CONFIG_H",
+            });
+
+            lib.addIncludePath(.{ .path = "deps/pcre" });
+            lib.linkLibrary(pcre);
+            features.addValues(.{ .GIT_REGEX_BUILTIN = 1 });
+        },
     }
 
     // src/CMakeLists.txt
@@ -480,4 +560,28 @@ const zlib_sources = [_][]const u8{
     "deps/zlib/zutil.c",
 };
 
-const pcre_sources = [_][]const u8{};
+const pcre_sources = [_][]const u8{
+    "deps/pcre/pcre_byte_order.c",
+    "deps/pcre/pcre_chartables.c",
+    "deps/pcre/pcre_compile.c",
+    "deps/pcre/pcre_config.c",
+    "deps/pcre/pcre_dfa_exec.c",
+    "deps/pcre/pcre_exec.c",
+    "deps/pcre/pcre_fullinfo.c",
+    "deps/pcre/pcre_get.c",
+    "deps/pcre/pcre_globals.c",
+    "deps/pcre/pcre_jit_compile.c",
+    "deps/pcre/pcre_maketables.c",
+    "deps/pcre/pcre_newline.c",
+    "deps/pcre/pcre_ord2utf8.c",
+    "deps/pcre/pcre_printint.c",
+    "deps/pcre/pcre_refcount.c",
+    "deps/pcre/pcre_string_utils.c",
+    "deps/pcre/pcre_study.c",
+    "deps/pcre/pcre_tables.c",
+    "deps/pcre/pcre_ucd.c",
+    "deps/pcre/pcre_valid_utf8.c",
+    "deps/pcre/pcre_version.c",
+    "deps/pcre/pcre_xclass.c",
+    "deps/pcre/pcreposix.c",
+};
