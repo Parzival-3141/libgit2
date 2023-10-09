@@ -284,7 +284,7 @@ pub fn build(b: *std.Build) !void {
             // This doesn't really deserve it's own option,
             // so you can change it here if you'd like.
             const newline: enum { lf, cr, crlf, any, anycrlf } = .lf;
-            const PCRE_NEWLINE = "-DPCRE_NEWLINE=" ++ switch (newline) {
+            const DNEWLINE = "-DNEWLINE=" ++ switch (newline) {
                 .lf => "10",
                 .cr => "13",
                 .crlf => "3338",
@@ -296,14 +296,16 @@ pub fn build(b: *std.Build) !void {
                 "-Wno-unused-function",
                 "-Wno-implicit-fallthrough",
                 "-DSUPPORT_PCRE8=1",
-                "-DPCRE_LINK_SIZE=2",
-                "-DPCRE_PARENS_NEST_LIMIT=250",
-                "-DPCRE_MATCH_LIMIT=10000000",
-                "-DPCRE_MATCH_LIMIT_RECURSION=MATCH_LIMIT",
-                PCRE_NEWLINE,
+                "-DLINK_SIZE=2",
+                "-DPARENS_NEST_LIMIT=250",
+                "-DMATCH_LIMIT=10000000",
+                "-DMATCH_LIMIT_RECURSION=MATCH_LIMIT",
+                DNEWLINE,
                 "-DNO_RECURSE=1",
-                "-DPCRE_POSIX_MALLOC_THRESHOLD=10",
+                "-DPOSIX_MALLOC_THRESHOLD=10",
                 "-DBSR_ANYCRLF=0",
+                "-DMAX_NAME_SIZE=32",
+                "-DMAX_NAME_COUNT=10000",
                 // TODO: deps/prce has a config.h.in, but just passing these
                 // as flags seems fine?
                 // "-DHAVE_CONFIG_H",
@@ -312,6 +314,21 @@ pub fn build(b: *std.Build) !void {
             lib.addIncludePath(.{ .path = "deps/pcre" });
             lib.linkLibrary(pcre);
             features.addValues(.{ .GIT_REGEX_BUILTIN = 1 });
+        },
+    }
+
+    // SelectXdiff.cmake
+    const xdiff_impl = b.option(enum { system, builtin }, "xdiff", "Choose xdiff implementation (default: builtin)") orelse .builtin;
+    switch (xdiff_impl) {
+        .system => @panic("external/system xdiff is not yet supported\n"),
+        .builtin => {
+            // Bundled xdiff dependency relies on libgit2 headers & utils, so we
+            // just add the source files directly instead of making a static lib step.
+
+            // the xdiff dependency is not (yet) warning-free, disable warnings
+            // as errors for the xdiff sources until we've sorted them out
+            lib.addCSourceFiles(&xdiff_sources, &.{ "-Wno-sign-compare", "-Wno-unused-parameter" });
+            lib.addIncludePath(.{ .path = "deps/xdiff" });
         },
     }
 
@@ -584,4 +601,14 @@ const pcre_sources = [_][]const u8{
     "deps/pcre/pcre_version.c",
     "deps/pcre/pcre_xclass.c",
     "deps/pcre/pcreposix.c",
+};
+
+const xdiff_sources = [_][]const u8{
+    "deps/xdiff/xdiffi.c",
+    "deps/xdiff/xemit.c",
+    "deps/xdiff/xhistogram.c",
+    "deps/xdiff/xmerge.c",
+    "deps/xdiff/xpatience.c",
+    "deps/xdiff/xprepare.c",
+    "deps/xdiff/xutils.c",
 };
