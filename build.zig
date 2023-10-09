@@ -223,6 +223,18 @@ pub fn build(b: *std.Build) !void {
         .https => unreachable,
     }
 
+    // SelectZlib.cmake
+    // TODO: Not bothering to build chromium's zlib right now
+    if (b.option(bool, "bundle-zlib", "Build the bundled version of zlib instead of linking the system one") orelse false) {
+        lib.addIncludePath(.{ .path = "deps/zlib" });
+        lib.addCSourceFiles(
+            &zlib_sources,
+            &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
+        );
+    } else {
+        lib.linkSystemLibrary("zlib");
+    }
+
     // src/CMakeLists.txt
     switch (target.toTarget().ptrBitWidth()) {
         32 => features.addValues(.{ .GIT_ARCH_32 = 1 }),
@@ -455,3 +467,17 @@ const util_unix_sources = [_][]const u8{
     "src/util/unix/process.c",
     "src/util/unix/realpath.c",
 };
+
+const zlib_sources = [_][]const u8{
+    "deps/zlib/adler32.c",
+    "deps/zlib/crc32.c",
+    "deps/zlib/deflate.c",
+    "deps/zlib/infback.c",
+    "deps/zlib/inffast.c",
+    "deps/zlib/inflate.c",
+    "deps/zlib/inftrees.c",
+    "deps/zlib/trees.c",
+    "deps/zlib/zutil.c",
+};
+
+const pcre_sources = [_][]const u8{};
