@@ -11,10 +11,6 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
 
-    lib.addIncludePath(.{ .path = "src/libgit2" });
-    lib.addIncludePath(.{ .path = "src/util" });
-    lib.addIncludePath(.{ .path = "include" });
-
     // TODO: maybe do -DLIBGIT2_NO_FEATURES_H and replace with flags?
     // Is configHeader slower?
     const features = b.addConfigHeader(
@@ -262,11 +258,6 @@ pub fn build(b: *std.Build) !void {
 
         lib.addIncludePath(.{ .path = "deps/zlib" });
         lib.linkLibrary(zlib);
-        // lib.addIncludePath(.{ .path = "deps/zlib" });
-        // lib.addCSourceFiles(
-        //     &zlib_sources,
-        //     &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
-        // );
     } else {
         lib.linkSystemLibrary("zlib");
     }
@@ -394,6 +385,9 @@ pub fn build(b: *std.Build) !void {
 
     switch (target.getOsTag()) {
         .windows => {
+            // Ensure that MinGW provides the correct header files.
+            // try flags.appendSlice(&.{ "-DWIN32", "-D_WIN32_WINNT=0x0600" });
+
             features.addValues(.{ .GIT_IO_WSAPOLL = 1 });
 
             lib.linkSystemLibrary("ws2_32");
@@ -434,12 +428,46 @@ pub fn build(b: *std.Build) !void {
         features.addValues(.{ .GIT_THREADS = 1 });
     }
 
+    // lib.force_pic = true;
+    // if (target.toTarget().isMinGW()) {
+    //     lib.defineCMacro("__USE_MINGW_ANSI_STDIO", null);
+    // }
+
+    lib.addIncludePath(.{ .path = "src/libgit2" });
+    lib.addIncludePath(.{ .path = "src/util" });
+    lib.addIncludePath(.{ .path = "include" });
+
     lib.addConfigHeader(features);
     lib.addCSourceFiles(&util_sources, flags.items);
     lib.addCSourceFiles(&libgit_sources, flags.items);
 
     lib.installHeadersDirectory("include", "git2");
     b.installArtifact(lib);
+
+    const cli_step = b.step("cli", "Build the command-line interface");
+    {
+        const cli = b.addExecutable(.{
+            .name = "git2_cli",
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+
+        cli.addIncludePath(.{ .path = "include" });
+        cli.addIncludePath(.{ .path = "src/util" });
+        cli.addIncludePath(.{ .path = "src/cli" });
+
+        if (target.isWindows())
+            cli.addCSourceFiles(&cli_win32_sources, &.{})
+        else
+            cli.addCSourceFiles(&cli_unix_sources, &.{});
+
+        cli.linkLibrary(lib);
+        cli.addConfigHeader(features);
+        cli.addCSourceFiles(&cli_sources, &.{});
+
+        cli_step.dependOn(&b.addInstallArtifact(cli, .{}).step);
+    }
 }
 
 const libgit_sources = [_][]const u8{
@@ -636,7 +664,7 @@ const util_win32_sources = [_][]const u8{
     "src/util/win32/map.c",
     "src/util/win32/path_w32.c",
     "src/util/win32/posix_w32.c",
-    "src/util/win32/precompiled.c",
+    // "src/util/win32/precompiled.c",
     "src/util/win32/process.c",
     "src/util/win32/thread.c",
     "src/util/win32/utf-conv.c",
@@ -697,4 +725,27 @@ const xdiff_sources = [_][]const u8{
     "deps/xdiff/xpatience.c",
     "deps/xdiff/xprepare.c",
     "deps/xdiff/xutils.c",
+};
+
+const cli_sources = [_][]const u8{
+    "src/cli/cmd.c",
+    "src/cli/cmd_cat_file.c",
+    "src/cli/cmd_clone.c",
+    "src/cli/cmd_config.c",
+    "src/cli/cmd_hash_object.c",
+    "src/cli/cmd_help.c",
+    "src/cli/common.c",
+    "src/cli/main.c",
+    "src/cli/opt.c",
+    "src/cli/opt_usage.c",
+    "src/cli/progress.c",
+};
+
+const cli_win32_sources = [_][]const u8{
+    // "src/cli/win32/precompiled.c",
+    "src/cli/win32/sighandler.c",
+};
+
+const cli_unix_sources = [_][]const u8{
+    "src/cli/unix/sighandler.c",
 };
