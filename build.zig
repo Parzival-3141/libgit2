@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) !void {
                 @panic("auto_detect Unimplemented\n");
             },
             .secure_transport => {
-                if (!target.isDarwin())
+                if (!target.result.isDarwin())
                     @panic("HTTPS SecureTransport backend only available on Darwin\n");
 
                 lib.linkFramework("Security");
@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) !void {
                 @panic("Todo: Security headers\n");
             },
             .openssl => {
-                if (target.isFreeBSD())
+                if (target.result.isBSD())
                     lib.linkSystemLibrary("ssl")
                 else
                     lib.linkSystemLibrary("openssl");
@@ -128,42 +128,45 @@ pub fn build(b: *std.Build) !void {
 
     switch (sha1_backend) {
         .collision_detection => {
-            lib.addCSourceFiles(&util_hash_collision_detection_sources, &.{
-                "-DSHA1DC_NO_STANDARD_INCLUDES=1",
-                "-DSHA1DC_CUSTOM_INCLUDE_SHA1_C=\"git2_util.h\"",
-                "-DSHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C=\"git2_util.h\"",
+            lib.addCSourceFiles(.{
+                .files = &util_hash_collision_detection_sources,
+                .flags = &.{
+                    "-DSHA1DC_NO_STANDARD_INCLUDES=1",
+                    "-DSHA1DC_CUSTOM_INCLUDE_SHA1_C=\"git2_util.h\"",
+                    "-DSHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C=\"git2_util.h\"",
+                },
             });
             features.addValues(.{ .GIT_SHA1_COLLISIONDETECT = 1 });
         },
         .openssl => {
-            if (target.isFreeBSD())
+            if (target.result.isBSD())
                 lib.linkSystemLibrary("ssl")
             else
                 lib.linkSystemLibrary("openssl");
 
             // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
+            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
             features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
         },
         .openssl_dynamic => {
             // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
+            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
 
             features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
             features.addValues(.{ .GIT_SHA1_OPENSSL_DYNAMIC = 1 });
             @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
         },
         .common_crypto => {
-            lib.addCSourceFiles(&util_hash_common_crypto_sources, &.{});
+            lib.addCSourceFiles(.{ .files = &util_hash_common_crypto_sources });
             features.addValues(.{ .GIT_SHA1_COMMON_CRYPTO = 1 });
         },
         .mbedTLS => {
-            lib.addCSourceFiles(&util_hash_mbedTLS_sources, &.{});
+            lib.addCSourceFiles(.{ .files = &util_hash_mbedTLS_sources });
             features.addValues(.{ .GIT_SHA1_MBEDTLS = 1 });
             @panic("Todo: mbedTLS\n");
         },
         .win32 => {
-            lib.addCSourceFiles(&util_hash_win32_sources, &.{});
+            lib.addCSourceFiles(.{ .files = &util_hash_win32_sources });
             features.addValues(.{ .GIT_SHA1_WIN32 = 1 });
         },
         .https => unreachable,
@@ -205,37 +208,37 @@ pub fn build(b: *std.Build) !void {
 
     switch (sha256_backend) {
         .builtin => {
-            lib.addCSourceFiles(&util_hash_builtin_sources, &.{});
+            lib.addCSourceFiles(.{ .files = &util_hash_builtin_sources });
             features.addValues(.{ .GIT_SHA256_BUILTIN = 1 });
         },
         .openssl => {
-            if (target.isFreeBSD())
+            if (target.result.isBSD())
                 lib.linkSystemLibrary("ssl")
             else
                 lib.linkSystemLibrary("openssl");
             // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
+            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
             features.addValues(.{ .GIT_SHA256_OPENSSL = 1 });
         },
         .openssl_dynamic => {
             // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(&util_hash_openssl_sources, &.{"-DOPENSSL_API_COMPAT=0x10100000L"});
+            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
 
             features.addValues(.{ .GIT_SHA256_OPENSSL = 1 });
             features.addValues(.{ .GIT_SHA256_OPENSSL_DYNAMIC = 1 });
             @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
         },
         .common_crypto => {
-            lib.addCSourceFiles(&util_hash_common_crypto_sources, &.{});
+            lib.addCSourceFiles(.{ .files = &util_hash_common_crypto_sources });
             features.addValues(.{ .GIT_SHA256_COMMON_CRYPTO = 1 });
         },
         .mbedTLS => {
-            lib.addCSourceFiles(&util_hash_mbedTLS_sources, &.{});
+            lib.addCSourceFiles(.{ .files = &util_hash_mbedTLS_sources });
             features.addValues(.{ .GIT_SHA256_MBEDTLS = 1 });
             @panic("Todo: mbedTLS\n");
         },
         .win32 => {
-            lib.addCSourceFiles(&util_hash_win32_sources, &.{});
+            lib.addCSourceFiles(.{ .files = &util_hash_win32_sources });
             features.addValues(.{ .GIT_SHA256_WIN32 = 1 });
         },
         .https => unreachable,
@@ -251,10 +254,10 @@ pub fn build(b: *std.Build) !void {
             .link_libc = true,
         });
         zlib.addIncludePath(.{ .path = "deps/zlib" });
-        zlib.addCSourceFiles(
-            &zlib_sources,
-            &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
-        );
+        zlib.addCSourceFiles(.{
+            .files = &zlib_sources,
+            .flags = &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
+        });
 
         lib.addIncludePath(.{ .path = "deps/zlib" });
         lib.linkLibrary(zlib);
@@ -307,23 +310,26 @@ pub fn build(b: *std.Build) !void {
                 .anycrlf => "-2",
             };
 
-            pcre.addCSourceFiles(&pcre_sources, &.{
-                "-Wno-unused-function",
-                "-Wno-implicit-fallthrough",
-                "-DSUPPORT_PCRE8=1",
-                "-DLINK_SIZE=2",
-                "-DPARENS_NEST_LIMIT=250",
-                "-DMATCH_LIMIT=10000000",
-                "-DMATCH_LIMIT_RECURSION=MATCH_LIMIT",
-                DNEWLINE,
-                "-DNO_RECURSE=1",
-                "-DPOSIX_MALLOC_THRESHOLD=10",
-                "-DBSR_ANYCRLF=0",
-                "-DMAX_NAME_SIZE=32",
-                "-DMAX_NAME_COUNT=10000",
-                // TODO: deps/prce has a config.h.in, but just passing these
-                // as flags seems fine?
-                // "-DHAVE_CONFIG_H",
+            pcre.addCSourceFiles(.{
+                .files = &pcre_sources,
+                .flags = &.{
+                    "-Wno-unused-function",
+                    "-Wno-implicit-fallthrough",
+                    "-DSUPPORT_PCRE8=1",
+                    "-DLINK_SIZE=2",
+                    "-DPARENS_NEST_LIMIT=250",
+                    "-DMATCH_LIMIT=10000000",
+                    "-DMATCH_LIMIT_RECURSION=MATCH_LIMIT",
+                    DNEWLINE,
+                    "-DNO_RECURSE=1",
+                    "-DPOSIX_MALLOC_THRESHOLD=10",
+                    "-DBSR_ANYCRLF=0",
+                    "-DMAX_NAME_SIZE=32",
+                    "-DMAX_NAME_COUNT=10000",
+                    // TODO: deps/prce has a config.h.in, but just passing these
+                    // as flags seems fine?
+                    // "-DHAVE_CONFIG_H",
+                },
             });
 
             lib.addIncludePath(.{ .path = "deps/pcre" });
@@ -342,7 +348,7 @@ pub fn build(b: *std.Build) !void {
 
             // the xdiff dependency is not (yet) warning-free, disable warnings
             // as errors for the xdiff sources until we've sorted them out
-            lib.addCSourceFiles(&xdiff_sources, &.{ "-Wno-sign-compare", "-Wno-unused-parameter" });
+            lib.addCSourceFiles(.{ .files = &xdiff_sources, .flags = &.{ "-Wno-sign-compare", "-Wno-unused-parameter" } });
             lib.addIncludePath(.{ .path = "deps/xdiff" });
         },
     }
@@ -374,7 +380,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     // src/CMakeLists.txt
-    switch (target.toTarget().ptrBitWidth()) {
+    switch (target.result.ptrBitWidth()) {
         32 => features.addValues(.{ .GIT_ARCH_32 = 1 }),
         64 => features.addValues(.{ .GIT_ARCH_64 = 1 }),
         else => |size| std.debug.panic("Unsupported architecture ({d}bit)", .{size}),
@@ -383,7 +389,7 @@ pub fn build(b: *std.Build) !void {
     var flags = std.ArrayList([]const u8).init(b.allocator);
     defer flags.deinit();
 
-    switch (target.getOsTag()) {
+    switch (target.result.os.tag) {
         .windows => {
             // Ensure that MinGW provides the correct header files.
             // try flags.appendSlice(&.{ "-DWIN32", "-D_WIN32_WINNT=0x0600" });
@@ -395,7 +401,7 @@ pub fn build(b: *std.Build) !void {
 
             lib.addWin32ResourceFile(.{ .file = .{ .path = "src/libgit2/git2.rc" } });
 
-            lib.addCSourceFiles(&util_win32_sources, flags.items);
+            lib.addCSourceFiles(.{ .files = &util_win32_sources, .flags = flags.items });
         },
         .solaris => {
             lib.linkSystemLibrary("socket");
@@ -408,8 +414,8 @@ pub fn build(b: *std.Build) !void {
         else => {},
     }
 
-    if (!target.isWindows()) {
-        lib.addCSourceFiles(&util_unix_sources, flags.items);
+    if (target.result.os.tag != .windows) {
+        lib.addCSourceFiles(.{ .files = &util_unix_sources, .flags = flags.items });
 
         @panic("Todo: poll\n");
         // check_symbol_exists(poll poll.h GIT_IO_POLL)
@@ -421,8 +427,8 @@ pub fn build(b: *std.Build) !void {
         "multi-threaded",
         "Use threads for parallel processing when possible (default: true)",
     ) orelse true) {
-        if (!target.isWindows()) {
-            lib.linkSystemLibraryNeeded("Threads"); // TODO: is this even correct?
+        if (target.result.os.tag != .windows) {
+            lib.linkSystemLibrary("Threads"); // TODO: is this even correct?
         }
 
         features.addValues(.{ .GIT_THREADS = 1 });
@@ -438,8 +444,8 @@ pub fn build(b: *std.Build) !void {
     lib.addIncludePath(.{ .path = "include" });
 
     lib.addConfigHeader(features);
-    lib.addCSourceFiles(&util_sources, flags.items);
-    lib.addCSourceFiles(&libgit_sources, flags.items);
+    lib.addCSourceFiles(.{ .files = &util_sources, .flags = flags.items });
+    lib.addCSourceFiles(.{ .files = &libgit_sources, .flags = flags.items });
 
     lib.installHeadersDirectory("include", "git2");
     b.installArtifact(lib);
@@ -457,14 +463,14 @@ pub fn build(b: *std.Build) !void {
         cli.addIncludePath(.{ .path = "src/util" });
         cli.addIncludePath(.{ .path = "src/cli" });
 
-        if (target.isWindows())
-            cli.addCSourceFiles(&cli_win32_sources, &.{})
+        if (target.result.os.tag == .windows)
+            cli.addCSourceFiles(.{ .files = &cli_win32_sources })
         else
-            cli.addCSourceFiles(&cli_unix_sources, &.{});
+            cli.addCSourceFiles(.{ .files = &cli_unix_sources });
 
         cli.linkLibrary(lib);
         cli.addConfigHeader(features);
-        cli.addCSourceFiles(&cli_sources, &.{});
+        cli.addCSourceFiles(.{ .files = &cli_sources });
 
         cli_step.dependOn(&b.addInstallArtifact(cli, .{}).step);
     }
