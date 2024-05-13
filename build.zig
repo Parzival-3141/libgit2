@@ -4,14 +4,14 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(std.Build.StaticLibraryOptions{
+    const lib = b.addStaticLibrary(.{
         .name = "git2",
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
 
-    // TODO: maybe do -DLIBGIT2_NO_FEATURES_H and replace with flags?
+    // @Todo: maybe do -DLIBGIT2_NO_FEATURES_H and replace with flags?
     // Is configHeader slower?
     const features = b.addConfigHeader(
         .{ .style = .{ .cmake = .{ .path = "src/util/git2_features.h.in" } } },
@@ -417,9 +417,12 @@ pub fn build(b: *std.Build) !void {
     if (target.result.os.tag != .windows) {
         lib.addCSourceFiles(.{ .files = &util_unix_sources, .flags = flags.items });
 
-        @panic("Todo: poll\n");
-        // check_symbol_exists(poll poll.h GIT_IO_POLL)
-        // check_symbol_exists(select sys/select.h GIT_IO_SELECT)
+        // if (libc supports poll.h:poll()) set(GIT_IO_POLL, 1)
+        // if (libc supports sys/select.h:select()) set(GIT_IO_SELECT, 1)
+        // @Todo: This'll do for now, as we're unconditionally linking libc above,
+        // but should double check this for non-standard libc's.
+        features.addValues(.{ .GIT_IO_POLL = 1 });
+        features.addValues(.{ .GIT_IO_SELECT = 1 });
     }
 
     if (b.option(
@@ -428,7 +431,14 @@ pub fn build(b: *std.Build) !void {
         "Use threads for parallel processing when possible (default: true)",
     ) orelse true) {
         if (target.result.os.tag != .windows) {
-            lib.linkSystemLibrary("Threads"); // TODO: is this even correct?
+            // @Todo: this code just seems wrong?
+            // if(NOT WIN32)
+            //     find_package(Threads REQUIRED)
+            //     list(APPEND LIBGIT2_SYSTEM_LIBS ${CMAKE_THREAD_LIBS_INIT})
+            //     list(APPEND LIBGIT2_PC_LIBS ${CMAKE_THREAD_LIBS_INIT})
+            // endif()
+
+            // lib.linkSystemLibrary("pthreads");
         }
 
         features.addValues(.{ .GIT_THREADS = 1 });
@@ -447,7 +457,7 @@ pub fn build(b: *std.Build) !void {
     lib.addCSourceFiles(.{ .files = &util_sources, .flags = flags.items });
     lib.addCSourceFiles(.{ .files = &libgit_sources, .flags = flags.items });
 
-    lib.installHeadersDirectory("include", "git2");
+    lib.installHeadersDirectory(.{ .path = "include" }, "git2", .{});
     b.installArtifact(lib);
 
     const cli_step = b.step("cli", "Build the command-line interface");
@@ -740,6 +750,7 @@ const cli_sources = [_][]const u8{
     "src/cli/cmd_config.c",
     "src/cli/cmd_hash_object.c",
     "src/cli/cmd_help.c",
+    "src/cli/cmd_index_pack.c",
     "src/cli/common.c",
     "src/cli/main.c",
     "src/cli/opt.c",
