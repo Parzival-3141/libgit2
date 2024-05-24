@@ -11,10 +11,8 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
 
-    // @Todo: maybe do -DLIBGIT2_NO_FEATURES_H and replace with flags?
-    // Is configHeader slower?
     const features = b.addConfigHeader(
-        .{ .style = .{ .cmake = .{ .path = "src/util/git2_features.h.in" } } },
+        .{ .style = .{ .cmake = b.path("src/util/git2_features.h.in") } },
         .{},
     );
 
@@ -52,7 +50,7 @@ pub fn build(b: *std.Build) !void {
                 else
                     lib.linkSystemLibrary("openssl");
                 features.addValues(.{ .GIT_OPENSSL = 1 });
-                @panic("Todo: include openssl headers\n");
+                // @panic("Todo: include openssl headers\n");
             },
             .openssl_dynamic => {
                 features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
@@ -60,8 +58,10 @@ pub fn build(b: *std.Build) !void {
                 @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
             },
             .mbedTLS => {
+                lib.linkSystemLibrary("mbedtls");
+                lib.linkSystemLibrary("mbedcrypto");
+                lib.linkSystemLibrary("mbedx509");
                 features.addValues(.{ .GIT_MBEDTLS = 1 });
-                @panic("mbedTLS Unimplemented\n");
             },
             .schannel => {
                 lib.linkSystemLibrary("rpcrt4");
@@ -253,13 +253,13 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
             .link_libc = true,
         });
-        zlib.addIncludePath(.{ .path = "deps/zlib" });
+        zlib.addIncludePath(b.path("deps/zlib"));
         zlib.addCSourceFiles(.{
             .files = &zlib_sources,
             .flags = &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
         });
 
-        lib.addIncludePath(.{ .path = "deps/zlib" });
+        lib.addIncludePath(b.path("deps/zlib"));
         lib.linkLibrary(zlib);
     } else {
         lib.linkSystemLibrary("zlib");
@@ -297,7 +297,7 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
                 .link_libc = true,
             });
-            pcre.addIncludePath(.{ .path = "deps/pcre" });
+            pcre.addIncludePath(b.path("deps/pcre"));
 
             // This doesn't really deserve it's own option,
             // so you can change it here if you'd like.
@@ -332,7 +332,7 @@ pub fn build(b: *std.Build) !void {
                 },
             });
 
-            lib.addIncludePath(.{ .path = "deps/pcre" });
+            lib.addIncludePath(b.path("deps/pcre"));
             lib.linkLibrary(pcre);
             features.addValues(.{ .GIT_REGEX_BUILTIN = 1 });
         },
@@ -349,7 +349,7 @@ pub fn build(b: *std.Build) !void {
             // the xdiff dependency is not (yet) warning-free, disable warnings
             // as errors for the xdiff sources until we've sorted them out
             lib.addCSourceFiles(.{ .files = &xdiff_sources, .flags = &.{ "-Wno-sign-compare", "-Wno-unused-parameter" } });
-            lib.addIncludePath(.{ .path = "deps/xdiff" });
+            lib.addIncludePath(b.path("deps/xdiff"));
         },
     }
 
@@ -368,13 +368,13 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
                 .link_libc = true,
             });
-            http_parser.addIncludePath(.{ .path = "deps/http-parser" });
+            http_parser.addIncludePath(b.path("deps/http-parser"));
             http_parser.addCSourceFile(.{
-                .file = .{ .path = "deps/http-parser/http_parser.c" },
+                .file = b.path("deps/http-parser/http_parser.c"),
                 .flags = &.{"-Wimplicit-fallthrough"},
             });
 
-            lib.addIncludePath(.{ .path = "deps/http-parser" });
+            lib.addIncludePath(b.path("deps/http-parser"));
             lib.linkLibrary(http_parser);
         },
     }
@@ -399,7 +399,7 @@ pub fn build(b: *std.Build) !void {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("secur32");
 
-            lib.addWin32ResourceFile(.{ .file = .{ .path = "src/libgit2/git2.rc" } });
+            lib.addWin32ResourceFile(.{ .file = b.path("src/libgit2/git2.rc") });
 
             lib.addCSourceFiles(.{ .files = &util_win32_sources, .flags = flags.items });
         },
@@ -431,14 +431,7 @@ pub fn build(b: *std.Build) !void {
         "Use threads for parallel processing when possible (default: true)",
     ) orelse true) {
         if (target.result.os.tag != .windows) {
-            // @Todo: this code just seems wrong?
-            // if(NOT WIN32)
-            //     find_package(Threads REQUIRED)
-            //     list(APPEND LIBGIT2_SYSTEM_LIBS ${CMAKE_THREAD_LIBS_INIT})
-            //     list(APPEND LIBGIT2_PC_LIBS ${CMAKE_THREAD_LIBS_INIT})
-            // endif()
-
-            // lib.linkSystemLibrary("pthreads");
+            lib.linkSystemLibrary("pthread");
         }
 
         features.addValues(.{ .GIT_THREADS = 1 });
@@ -449,15 +442,16 @@ pub fn build(b: *std.Build) !void {
     //     lib.defineCMacro("__USE_MINGW_ANSI_STDIO", null);
     // }
 
-    lib.addIncludePath(.{ .path = "src/libgit2" });
-    lib.addIncludePath(.{ .path = "src/util" });
-    lib.addIncludePath(.{ .path = "include" });
+    lib.addIncludePath(b.path("src/libgit2"));
+    lib.addIncludePath(b.path("src/util"));
+    lib.addIncludePath(b.path("include"));
 
+    try flags.append("-DHAVE_CONFIG_H");
     lib.addConfigHeader(features);
     lib.addCSourceFiles(.{ .files = &util_sources, .flags = flags.items });
     lib.addCSourceFiles(.{ .files = &libgit_sources, .flags = flags.items });
 
-    lib.installHeadersDirectory(.{ .path = "include" }, "git2", .{});
+    lib.installHeadersDirectory(b.path("include"), "git2", .{});
     b.installArtifact(lib);
 
     const cli_step = b.step("cli", "Build the command-line interface");
@@ -469,9 +463,9 @@ pub fn build(b: *std.Build) !void {
             .link_libc = true,
         });
 
-        cli.addIncludePath(.{ .path = "include" });
-        cli.addIncludePath(.{ .path = "src/util" });
-        cli.addIncludePath(.{ .path = "src/cli" });
+        cli.addIncludePath(b.path("include"));
+        cli.addIncludePath(b.path("src/util"));
+        cli.addIncludePath(b.path("src/cli"));
 
         if (target.result.os.tag == .windows)
             cli.addCSourceFiles(.{ .files = &cli_win32_sources })
