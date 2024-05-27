@@ -1,8 +1,44 @@
 const std = @import("std");
 
+// Reference CMake output:
+// -- Enabled features:
+//  * nanoseconds, support nanosecond precision file mtimes and ctimes
+//  * HTTPS, using mbedTLS
+//  * SHA1, using mbedTLS
+//  * SHA256, using mbedTLS
+//  * http-parser, http-parser support (bundled)
+//  * regex, using bundled PCRE
+//  * xdiff, xdiff support (bundled)
+//  * SSH, using libssh2
+//  * zlib, using bundled zlib
+//  * futimens, futimens support
+//  * threadsafe, threadsafe support
+//  * ntlmclient, NTLM authentication support for Unix
+
+// -- Disabled features:
+//  * SHA256 API, experimental SHA256 APIs
+//  * debugpool, debug pool allocator
+//  * debugalloc, debug strict allocators
+//  * debugopen, path validation in open
+//  * GSSAPI, GSSAPI support for SPNEGO authentication
+//  * iconv, iconv encoding conversion support
+
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const features = b.addConfigHeader(
+        .{ .style = .{ .cmake = b.path("src/util/git2_features.h.in") } },
+        .{
+            .GIT_THREADS = 1,
+
+            // @Todo: add per target conditionals for these
+            .GIT_USE_NSEC = 1,
+            .GIT_USE_STAT_MTIM = 1,
+            .GIT_RAND_GETENTROPY = 1,
+            .GIT_RAND_GETLOADAVG = 1,
+        },
+    );
 
     const lib = b.addStaticLibrary(.{
         .name = "git2",
@@ -11,244 +47,142 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
 
-    const features = b.addConfigHeader(
-        .{ .style = .{ .cmake = b.path("src/util/git2_features.h.in") } },
-        .{},
-    );
-
-    // SelectHTTPSBackend.cmake
-    const HTTPS_Options = enum {
-        auto_detect,
-        secure_transport,
-        openssl,
-        openssl_dynamic,
-        mbedTLS,
-        schannel,
-        winhttp,
+    const libgit_flags = [_][]const u8{
+        // @Todo: for some reason, trying to use c90 as specified in the cmake
+        // files causes compile errors relating to pthreads. Using gnu90 or the
+        // default compiles, so I guess this is fine?
+        // "-std=c90",
+        "-Wall",
+        "-Wextra",
+        "-Wno-missing-field-initializers",
+        "-DHAVE_CONFIG_H",
+        if (target.result.os.tag != .windows)
+            "-DGIT_DEFAULT_CERT_LOCATION=\"/etc/ssl/certs/\""
+        else
+            "",
     };
-    const https_backend = b.option(HTTPS_Options, "https-backend", "");
-    if (https_backend) |h| {
-        switch (h) {
-            .auto_detect => {
-                // lib.linkSystemLibrary2();
-                // lib.checkObject()
-                // TODO: try to find which libraries are installed on the host
-                @panic("auto_detect Unimplemented\n");
-            },
-            .secure_transport => {
-                if (!target.result.isDarwin())
-                    @panic("HTTPS SecureTransport backend only available on Darwin\n");
 
-                lib.linkFramework("Security");
-                lib.linkFramework("CoreFoundation");
-                features.addValues(.{ .GIT_SECURE_TRANSPORT = 1 });
-                @panic("Todo: Security headers\n");
-            },
-            .openssl => {
-                if (target.result.isBSD())
-                    lib.linkSystemLibrary("ssl")
-                else
-                    lib.linkSystemLibrary("openssl");
-                features.addValues(.{ .GIT_OPENSSL = 1 });
-                // @panic("Todo: include openssl headers\n");
-            },
-            .openssl_dynamic => {
-                features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
-                features.addValues(.{ .GIT_SHA1_OPENSSL_DYNAMIC = 1 });
-                @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
-            },
-            .mbedTLS => {
-                lib.linkSystemLibrary("mbedtls");
-                lib.linkSystemLibrary("mbedcrypto");
-                lib.linkSystemLibrary("mbedx509");
-                features.addValues(.{ .GIT_MBEDTLS = 1 });
-            },
-            .schannel => {
-                lib.linkSystemLibrary("rpcrt4");
-                lib.linkSystemLibrary("crypt32");
-                lib.linkSystemLibrary("ole32");
-                features.addValues(.{ .GIT_SCHANNEL = 1 });
-            },
-            .winhttp => {
-                // Since MinGW does not come with headers or an import library for winhttp,
-                // we have to include a private header and generate our own import library
-                // if (target.toTarget().isMinGW()) {
-                //     @panic("Todo: build and link deps/winhttp\n");
-                // } else {
-                lib.linkSystemLibrary("winhttp");
-                // }
+    if (target.result.os.tag == .windows) {
+        lib.linkSystemLibrary("winhttp");
+        lib.linkSystemLibrary("rpcrt4");
+        lib.linkSystemLibrary("crypt32");
+        lib.linkSystemLibrary("ole32");
 
-                lib.linkSystemLibrary("rpcrt4");
-                lib.linkSystemLibrary("crypt32");
-                lib.linkSystemLibrary("ole32");
-                features.addValues(.{ .GIT_WINHTTP = 1 });
-            },
-        }
-
-        features.addValues(.{ .GIT_HTTPS = 1 });
+        features.addValues(.{
+            .GIT_WINHTTP = 1,
+            .GIT_IO_WSAPOLL = 1,
+        });
+        @panic("@Todo: windows support");
     } else {
-        features.addValues(.{ .GIT_HTTPS = 0 });
-    }
+        // mbedTLS https and SHA backend
+        lib.linkSystemLibrary("mbedtls");
+        lib.linkSystemLibrary("mbedcrypto");
+        lib.linkSystemLibrary("mbedx509");
+        features.addValues(.{
+            .GIT_HTTPS = 1,
+            .GIT_MBEDTLS = 1,
+            .GIT_SHA1_MBEDTLS = 1,
+            .GIT_SHA256_MBEDTLS = 1,
 
-    // SelectHashes.cmake
-    // TODO: try compressing the sha stuff into one codepath
-    const SHA1_Options = enum {
-        collision_detection,
-        openssl,
-        openssl_dynamic,
-        common_crypto,
-        mbedTLS,
-        win32,
-        /// Checks the HTTPS flag to determine backend
-        https,
-    };
-    const sha1_backend = blk: {
-        var sha = b.option(
-            SHA1_Options,
-            "sha1-backend",
-            "Passing 'https' will check '-Dhttps-backend' flag to determine backend (default: collision_detection)",
-        ) orelse .collision_detection;
+            .GIT_USE_FUTIMENS = 1,
+            .GIT_IO_POLL = 1,
+            .GIT_IO_SELECT = 1,
+        });
 
-        if (sha == .https) {
-            sha = if (https_backend) |https|
-                switch (https) {
-                    .auto_detect => @panic("Unimplemented\n"),
-                    .secure_transport => .common_crypto,
-                    .schannel, .winhttp => .win32,
-                    .openssl => .openssl,
-                    .openssl_dynamic => .openssl_dynamic,
-                    .mbedTLS => .mbedTLS,
-                }
-            else
-                .collision_detection;
-        }
-
-        break :blk sha;
-    };
-
-    switch (sha1_backend) {
-        .collision_detection => {
-            lib.addCSourceFiles(.{
-                .files = &util_hash_collision_detection_sources,
+        // ntlmclient
+        {
+            const ntlm = b.addStaticLibrary(.{
+                .name = "ntlmclient",
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            });
+            ntlm.addIncludePath(b.path("deps/ntlmclient"));
+            ntlm.addCSourceFiles(.{
+                .files = &ntlm_sources,
                 .flags = &.{
-                    "-DSHA1DC_NO_STANDARD_INCLUDES=1",
-                    "-DSHA1DC_CUSTOM_INCLUDE_SHA1_C=\"git2_util.h\"",
-                    "-DSHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C=\"git2_util.h\"",
+                    "-Wno-implicit-fallthrough",
+                    "-DNTLM_STATIC=1",
+                    "-DUNICODE_BUILTIN=1",
+                    "-DCRYPT_MBEDTLS",
                 },
             });
-            features.addValues(.{ .GIT_SHA1_COLLISIONDETECT = 1 });
-        },
-        .openssl => {
-            if (target.result.isBSD())
-                lib.linkSystemLibrary("ssl")
-            else
-                lib.linkSystemLibrary("openssl");
 
-            // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
-            features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
-        },
-        .openssl_dynamic => {
-            // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
-
-            features.addValues(.{ .GIT_SHA1_OPENSSL = 1 });
-            features.addValues(.{ .GIT_SHA1_OPENSSL_DYNAMIC = 1 });
-            @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
-        },
-        .common_crypto => {
-            lib.addCSourceFiles(.{ .files = &util_hash_common_crypto_sources });
-            features.addValues(.{ .GIT_SHA1_COMMON_CRYPTO = 1 });
-        },
-        .mbedTLS => {
-            lib.addCSourceFiles(.{ .files = &util_hash_mbedTLS_sources });
-            features.addValues(.{ .GIT_SHA1_MBEDTLS = 1 });
-            @panic("Todo: mbedTLS\n");
-        },
-        .win32 => {
-            lib.addCSourceFiles(.{ .files = &util_hash_win32_sources });
-            features.addValues(.{ .GIT_SHA1_WIN32 = 1 });
-        },
-        .https => unreachable,
-    }
-
-    const SHA256_Options = enum {
-        builtin,
-        openssl,
-        openssl_dynamic,
-        common_crypto,
-        mbedTLS,
-        win32,
-        /// Checks the HTTPS flag to determine backend
-        https,
-    };
-    const sha256_backend = blk: {
-        var sha = b.option(
-            SHA256_Options,
-            "sha256-backend",
-            "Passing 'https' will check '-Dhttps-backend' flag to determine backend (default: builtin)",
-        ) orelse .builtin;
-
-        if (sha == .https) {
-            sha = if (https_backend) |https|
-                switch (https) {
-                    .auto_detect => @panic("Unimplemented\n"),
-                    .secure_transport => .common_crypto,
-                    .schannel, .winhttp => .win32,
-                    .openssl => .openssl,
-                    .openssl_dynamic => .openssl_dynamic,
-                    .mbedTLS => .mbedTLS,
-                }
-            else
-                @panic("https-backend flag missing\n");
+            lib.linkLibrary(ntlm);
+            lib.addAfterIncludePath(b.path("deps/ntlmclient")); // avoid aliasing ntlmclient/util.h and src/util/util.h
+            features.addValues(.{ .GIT_NTLM = 1 });
         }
 
-        break :blk sha;
-    };
-
-    switch (sha256_backend) {
-        .builtin => {
-            lib.addCSourceFiles(.{ .files = &util_hash_builtin_sources });
-            features.addValues(.{ .GIT_SHA256_BUILTIN = 1 });
-        },
-        .openssl => {
-            if (target.result.isBSD())
-                lib.linkSystemLibrary("ssl")
-            else
-                lib.linkSystemLibrary("openssl");
-            // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
-            features.addValues(.{ .GIT_SHA256_OPENSSL = 1 });
-        },
-        .openssl_dynamic => {
-            // TODO: this is probably an option for openssl itself...
-            lib.addCSourceFiles(.{ .files = &util_hash_openssl_sources, .flags = &.{"-DOPENSSL_API_COMPAT=0x10100000L"} });
-
-            features.addValues(.{ .GIT_SHA256_OPENSSL = 1 });
-            features.addValues(.{ .GIT_SHA256_OPENSSL_DYNAMIC = 1 });
-            @panic("Todo: list(APPEND LIBGIT2_SYSTEM_LIBS dl)");
-        },
-        .common_crypto => {
-            lib.addCSourceFiles(.{ .files = &util_hash_common_crypto_sources });
-            features.addValues(.{ .GIT_SHA256_COMMON_CRYPTO = 1 });
-        },
-        .mbedTLS => {
-            lib.addCSourceFiles(.{ .files = &util_hash_mbedTLS_sources });
-            features.addValues(.{ .GIT_SHA256_MBEDTLS = 1 });
-            @panic("Todo: mbedTLS\n");
-        },
-        .win32 => {
-            lib.addCSourceFiles(.{ .files = &util_hash_win32_sources });
-            features.addValues(.{ .GIT_SHA256_WIN32 = 1 });
-        },
-        .https => unreachable,
+        lib.addCSourceFiles(.{ .files = &util_unix_sources, .flags = &libgit_flags });
     }
 
-    // SelectZlib.cmake
-    // TODO: Not bothering to build chromium's zlib right now
-    if (b.option(bool, "bundle-zlib", "Build the bundled version of zlib instead of linking the system one") orelse false) {
+    if (b.option(bool, "use-ssh", "Enable SSH support") orelse false) {
+        lib.linkSystemLibrary("ssh2");
+        features.addValues(.{
+            .GIT_SSH = 1,
+            .GIT_SSH_LIBSSH2 = 1,
+            .GIT_SSH_LIBSSH2_MEMORY_CREDENTIALS = 1, // @Todo: check for `libssh2_userauth_publickey_frommemory`?
+        });
+    }
+
+    // Bundled dependencies
+    {
+        const http_parser = b.addStaticLibrary(.{
+            .name = "http-parser",
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        http_parser.addIncludePath(b.path("deps/http-parser"));
+        http_parser.addCSourceFile(.{
+            .file = b.path("deps/http-parser/http_parser.c"),
+            .flags = &.{"-Wimplicit-fallthrough"},
+        });
+
+        lib.addIncludePath(b.path("deps/http-parser"));
+        lib.linkLibrary(http_parser);
+    }
+    {
+        const pcre = b.addStaticLibrary(.{
+            .name = "pcre",
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        pcre.root_module.addConfigHeader(b.addConfigHeader(
+            .{ .style = .{ .cmake = b.path("deps/pcre/config.h.in") } },
+            .{
+                .SUPPORT_PCRE8 = 1,
+                .PCRE_LINK_SIZE = 2,
+                .PCRE_PARENS_NEST_LIMIT = 250,
+                .PCRE_MATCH_LIMIT = 10000000,
+                .PCRE_MATCH_LIMIT_RECURSION = "MATCH_LIMIT",
+                .NEWLINE = 10, // LF
+                .NO_RECURSE = 1,
+                .PCRE_POSIX_MALLOC_THRESHOLD = 10,
+                .BSR_ANYCRLF = 0,
+                // "-DMAX_NAME_SIZE=32",
+                // "-DMAX_NAME_COUNT=10000",
+            },
+        ));
+        pcre.addIncludePath(b.path("deps/pcre"));
+        pcre.addCSourceFiles(.{
+            .files = &pcre_sources,
+            .flags = &.{
+                "-Wno-unused-function",
+                "-Wno-implicit-fallthrough",
+                "-DHAVE_CONFIG_H",
+            },
+        });
+
+        lib.addIncludePath(b.path("deps/pcre"));
+        lib.linkLibrary(pcre);
+        features.addValues(.{ .GIT_REGEX_BUILTIN = 1 });
+    }
+    {
+        // @Todo: support using system zlib?
         const zlib = b.addStaticLibrary(.{
-            .name = "zlib",
+            .name = "z",
             .target = target,
             .optimize = optimize,
             .link_libc = true,
@@ -256,205 +190,56 @@ pub fn build(b: *std.Build) !void {
         zlib.addIncludePath(b.path("deps/zlib"));
         zlib.addCSourceFiles(.{
             .files = &zlib_sources,
-            .flags = &.{ "-Wno-implicit-fallthrough", "-DNO_VIZ", "-DSTDC", "-DNO_GZIP" },
+            .flags = &.{
+                "-Wno-implicit-fallthrough",
+                "-DNO_VIZ",
+                "-DSTDC",
+                "-DNO_GZIP",
+                "-DHAVE_SYS_TYPES_H",
+                "-DHAVE_STDINT_H",
+                "-DHAVE_STDDEF_H",
+            },
         });
 
         lib.addIncludePath(b.path("deps/zlib"));
         lib.linkLibrary(zlib);
-    } else {
-        lib.linkSystemLibrary("zlib");
+    }
+    // xdiff
+    {
+        // Bundled xdiff dependency relies on libgit2 headers & utils, so we
+        // just add the source files directly instead of making a static lib step.
+
+        // (Note from CMakeLists file:
+        // the xdiff dependency is not (yet) warning-free, disable warnings
+        // as errors for the xdiff sources until we've sorted them out)
+        lib.addCSourceFiles(.{
+            .files = &xdiff_sources,
+            .flags = &.{ "-Wno-sign-compare", "-Wno-unused-parameter" },
+        });
+        lib.addIncludePath(b.path("deps/xdiff"));
     }
 
-    // SelectRegex.cmake
-    // TODO: if unspecified, try using recomp_l, then pcre, then builtin
-    const RegexOptions = enum { builtin, pcre, pcre2, regcomp, regcomp_l };
-    const regex_backend = b.option(RegexOptions, "regex-backend", "Regular expression backend. (default: builtin)") orelse .builtin;
-    switch (regex_backend) {
-        .pcre => {
-            lib.linkSystemLibrary("libpcre");
-            features.addValues(.{ .GIT_REGEX_PCRE = 1 });
-            @panic("Todo: include pcre headers\n");
-        },
-        .pcre2 => {
-            lib.linkSystemLibrary("libpcre2-8");
-            features.addValues(.{ .GIT_REGEX_PCRE2 = 1 });
-            @panic("Todo: pcre2\n");
-        },
-        .regcomp => {
-            // lib.linkSystemLibrary("regcomp"); // it's included in libc?
-            features.addValues(.{ .GIT_REGEX_REGCOMP = 1 });
-        },
-        .regcomp_l => {
-            // lib.linkSystemLibrary("regcomp_l"); // it's included in libc?
-            features.addValues(.{ .GIT_REGEX_REGCOMP_L = 1 });
-        },
-        .builtin => {
-            // deps/pcre/CMakeLists.txt
-            // deps/pcre/config.h.in
-            const pcre = b.addStaticLibrary(.{
-                .name = "pcre",
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            });
-            pcre.addIncludePath(b.path("deps/pcre"));
-
-            // This doesn't really deserve it's own option,
-            // so you can change it here if you'd like.
-            const newline: enum { lf, cr, crlf, any, anycrlf } = .lf;
-            const DNEWLINE = "-DNEWLINE=" ++ switch (newline) {
-                .lf => "10",
-                .cr => "13",
-                .crlf => "3338",
-                .any => "-1",
-                .anycrlf => "-2",
-            };
-
-            pcre.addCSourceFiles(.{
-                .files = &pcre_sources,
-                .flags = &.{
-                    "-Wno-unused-function",
-                    "-Wno-implicit-fallthrough",
-                    "-DSUPPORT_PCRE8=1",
-                    "-DLINK_SIZE=2",
-                    "-DPARENS_NEST_LIMIT=250",
-                    "-DMATCH_LIMIT=10000000",
-                    "-DMATCH_LIMIT_RECURSION=MATCH_LIMIT",
-                    DNEWLINE,
-                    "-DNO_RECURSE=1",
-                    "-DPOSIX_MALLOC_THRESHOLD=10",
-                    "-DBSR_ANYCRLF=0",
-                    "-DMAX_NAME_SIZE=32",
-                    "-DMAX_NAME_COUNT=10000",
-                    // TODO: deps/prce has a config.h.in, but just passing these
-                    // as flags seems fine?
-                    // "-DHAVE_CONFIG_H",
-                },
-            });
-
-            lib.addIncludePath(b.path("deps/pcre"));
-            lib.linkLibrary(pcre);
-            features.addValues(.{ .GIT_REGEX_BUILTIN = 1 });
-        },
-    }
-
-    // SelectXdiff.cmake
-    const xdiff_impl = b.option(enum { system, builtin }, "xdiff", "Specifies the xdiff implementation (default: builtin)") orelse .builtin;
-    switch (xdiff_impl) {
-        .system => @panic("external/system xdiff is not yet supported\n"),
-        .builtin => {
-            // Bundled xdiff dependency relies on libgit2 headers & utils, so we
-            // just add the source files directly instead of making a static lib step.
-
-            // the xdiff dependency is not (yet) warning-free, disable warnings
-            // as errors for the xdiff sources until we've sorted them out
-            lib.addCSourceFiles(.{ .files = &xdiff_sources, .flags = &.{ "-Wno-sign-compare", "-Wno-unused-parameter" } });
-            lib.addIncludePath(b.path("deps/xdiff"));
-        },
-    }
-
-    // SelectHTTPParser.cmake
-    const http_parser_impl = b.option(enum { system, builtin }, "http-parser", "Specifies the HTTP Parser implementation (default: builtin)") orelse .builtin;
-    switch (http_parser_impl) {
-        .system => {
-            lib.linkSystemLibrary("http_parser");
-            @panic("Todo: include system http_parser headers\n");
-        },
-        .builtin => {
-            // deps/http_parser/CMakeLists.txt
-            const http_parser = b.addStaticLibrary(.{
-                .name = "http_parser",
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            });
-            http_parser.addIncludePath(b.path("deps/http-parser"));
-            http_parser.addCSourceFile(.{
-                .file = b.path("deps/http-parser/http_parser.c"),
-                .flags = &.{"-Wimplicit-fallthrough"},
-            });
-
-            lib.addIncludePath(b.path("deps/http-parser"));
-            lib.linkLibrary(http_parser);
-        },
-    }
-
-    // src/CMakeLists.txt
     switch (target.result.ptrBitWidth()) {
         32 => features.addValues(.{ .GIT_ARCH_32 = 1 }),
         64 => features.addValues(.{ .GIT_ARCH_64 = 1 }),
         else => |size| std.debug.panic("Unsupported architecture ({d}bit)", .{size}),
     }
 
-    var flags = std.ArrayList([]const u8).init(b.allocator);
-    defer flags.deinit();
+    // @Todo: ICONV?
 
-    switch (target.result.os.tag) {
-        .windows => {
-            // Ensure that MinGW provides the correct header files.
-            // try flags.appendSlice(&.{ "-DWIN32", "-D_WIN32_WINNT=0x0600" });
-
-            features.addValues(.{ .GIT_IO_WSAPOLL = 1 });
-
-            lib.linkSystemLibrary("ws2_32");
-            lib.linkSystemLibrary("secur32");
-
-            lib.addWin32ResourceFile(.{ .file = b.path("src/libgit2/git2.rc") });
-
-            lib.addCSourceFiles(.{ .files = &util_win32_sources, .flags = flags.items });
-        },
-        .solaris => {
-            lib.linkSystemLibrary("socket");
-            lib.linkSystemLibrary("nsl");
-        },
-        .haiku => {
-            lib.linkSystemLibrary("gnu");
-            lib.linkSystemLibrary("network");
-        },
-        else => {},
-    }
-
-    if (target.result.os.tag != .windows) {
-        lib.addCSourceFiles(.{ .files = &util_unix_sources, .flags = flags.items });
-
-        // if (libc supports poll.h:poll()) set(GIT_IO_POLL, 1)
-        // if (libc supports sys/select.h:select()) set(GIT_IO_SELECT, 1)
-        // @Todo: This'll do for now, as we're unconditionally linking libc above,
-        // but should double check this for non-standard libc's.
-        features.addValues(.{ .GIT_IO_POLL = 1 });
-        features.addValues(.{ .GIT_IO_SELECT = 1 });
-    }
-
-    if (b.option(
-        bool,
-        "multi-threaded",
-        "Use threads for parallel processing when possible (default: true)",
-    ) orelse true) {
-        if (target.result.os.tag != .windows) {
-            lib.linkSystemLibrary("pthread");
-        }
-
-        features.addValues(.{ .GIT_THREADS = 1 });
-    }
-
-    // lib.force_pic = true;
-    // if (target.toTarget().isMinGW()) {
-    //     lib.defineCMacro("__USE_MINGW_ANSI_STDIO", null);
-    // }
+    lib.addConfigHeader(features);
 
     lib.addIncludePath(b.path("src/libgit2"));
     lib.addIncludePath(b.path("src/util"));
     lib.addIncludePath(b.path("include"));
 
-    try flags.append("-DHAVE_CONFIG_H");
-    lib.addConfigHeader(features);
-    lib.addCSourceFiles(.{ .files = &util_sources, .flags = flags.items });
-    lib.addCSourceFiles(.{ .files = &libgit_sources, .flags = flags.items });
+    lib.addCSourceFiles(.{ .files = &libgit_sources, .flags = &libgit_flags });
+    lib.addCSourceFiles(.{ .files = &util_sources, .flags = &libgit_flags });
 
     lib.installHeadersDirectory(b.path("include"), "git2", .{});
     b.installArtifact(lib);
 
-    const cli_step = b.step("cli", "Build the command-line interface");
+    const cli_step = b.step("run-cli", "Build and run the command-line interface");
     {
         const cli = b.addExecutable(.{
             .name = "git2_cli",
@@ -463,6 +248,7 @@ pub fn build(b: *std.Build) !void {
             .link_libc = true,
         });
 
+        cli.addConfigHeader(features);
         cli.addIncludePath(b.path("include"));
         cli.addIncludePath(b.path("src/util"));
         cli.addIncludePath(b.path("src/cli"));
@@ -473,10 +259,45 @@ pub fn build(b: *std.Build) !void {
             cli.addCSourceFiles(.{ .files = &cli_unix_sources });
 
         cli.linkLibrary(lib);
-        cli.addConfigHeader(features);
-        cli.addCSourceFiles(.{ .files = &cli_sources });
+        cli.addCSourceFiles(.{
+            .files = &cli_sources,
+            // .flags = &.{"-std=c90"},
+        });
 
-        cli_step.dependOn(&b.addInstallArtifact(cli, .{}).step);
+        b.installArtifact(cli);
+
+        const cli_run = b.addRunArtifact(cli);
+        if (b.args) |args| {
+            for (args) |arg| cli_run.addArg(arg);
+        }
+        cli_step.dependOn(&cli_run.step);
+    }
+
+    const examples_step = b.step("run-example", "Build and run library usage example app");
+    {
+        const exe = b.addExecutable(.{
+            .name = "lg2",
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+
+        exe.addIncludePath(b.path("examples"));
+        exe.addCSourceFiles(.{
+            .files = &example_sources,
+            .flags = &.{"-DGIT_DEPRECATE_HARD"},
+        });
+
+        exe.addIncludePath(b.path("include"));
+        exe.linkLibrary(lib);
+
+        b.installArtifact(exe);
+
+        const example_run = b.addRunArtifact(exe);
+        if (b.args) |args| {
+            for (args) |arg| example_run.addArg(arg);
+        }
+        examples_step.dependOn(&example_run.step);
     }
 }
 
@@ -624,6 +445,15 @@ const util_sources = [_][]const u8{
     "src/util/filebuf.c",
     "src/util/fs_path.c",
     "src/util/futils.c",
+    // "src/util/hash/builtin.c",
+    // "src/util/hash/collisiondetect.c",
+    // "src/util/hash/common_crypto.c",
+    "src/util/hash/mbedtls.c",
+    // "src/util/hash/openssl.c",
+    // "src/util/hash/rfc6234/sha224-256.c",
+    // "src/util/hash/sha1dc/sha1.c",
+    // "src/util/hash/sha1dc/ubc_check.c",
+    // "src/util/hash/win32.c",
     "src/util/hash.c",
     "src/util/net.c",
     "src/util/pool.c",
@@ -638,67 +468,34 @@ const util_sources = [_][]const u8{
     "src/util/strmap.c",
     "src/util/thread.c",
     "src/util/tsort.c",
+    // "src/util/unix/map.c",
+    // "src/util/unix/process.c",
+    // "src/util/unix/realpath.c",
     "src/util/utf8.c",
     "src/util/util.c",
     "src/util/varint.c",
     "src/util/vector.c",
     "src/util/wildmatch.c",
-    "src/util/zstream.c",
-};
-
-const util_hash_collision_detection_sources = [_][]const u8{
-    "src/util/hash/collisiondetect.c",
-    "src/util/hash/sha1dc/sha1.c",
-    "src/util/hash/sha1dc/ubc_check.c",
-};
-const util_hash_openssl_sources = [_][]const u8{
-    "src/util/hash/openssl.c",
-};
-const util_hash_common_crypto_sources = [_][]const u8{
-    "src/util/hash/common_crypto.c",
-};
-const util_hash_mbedTLS_sources = [_][]const u8{
-    "src/util/hash/mbedtls.c",
-};
-const util_hash_win32_sources = [_][]const u8{
-    "src/util/hash/win32.c",
-};
-const util_hash_builtin_sources = [_][]const u8{
-    "src/util/hash/builtin.c",
-    "src/util/hash/rfc6234/sha224-256.c",
-};
-
-const util_win32_sources = [_][]const u8{
-    "src/util/win32/dir.c",
-    "src/util/win32/error.c",
-    "src/util/win32/map.c",
-    "src/util/win32/path_w32.c",
-    "src/util/win32/posix_w32.c",
+    // "src/util/win32/dir.c",
+    // "src/util/win32/error.c",
+    // "src/util/win32/map.c",
+    // "src/util/win32/path_w32.c",
+    // "src/util/win32/posix_w32.c",
     // "src/util/win32/precompiled.c",
-    "src/util/win32/process.c",
-    "src/util/win32/thread.c",
-    "src/util/win32/utf-conv.c",
-    "src/util/win32/w32_buffer.c",
-    "src/util/win32/w32_leakcheck.c",
-    "src/util/win32/w32_util.c",
+    // "src/util/win32/process.c",
+    // "src/util/win32/thread.c",
+    // "src/util/win32/utf-conv.c",
+    // "src/util/win32/w32_buffer.c",
+    // "src/util/win32/w32_leakcheck.c",
+    // "src/util/win32/w32_util.c",
+    "src/util/zstream.c",
 };
 
 const util_unix_sources = [_][]const u8{
     "src/util/unix/map.c",
     "src/util/unix/process.c",
     "src/util/unix/realpath.c",
-};
-
-const zlib_sources = [_][]const u8{
-    "deps/zlib/adler32.c",
-    "deps/zlib/crc32.c",
-    "deps/zlib/deflate.c",
-    "deps/zlib/infback.c",
-    "deps/zlib/inffast.c",
-    "deps/zlib/inflate.c",
-    "deps/zlib/inftrees.c",
-    "deps/zlib/trees.c",
-    "deps/zlib/zutil.c",
+    "src/util/hash/mbedtls.c",
 };
 
 const pcre_sources = [_][]const u8{
@@ -727,6 +524,18 @@ const pcre_sources = [_][]const u8{
     "deps/pcre/pcreposix.c",
 };
 
+const zlib_sources = [_][]const u8{
+    "deps/zlib/adler32.c",
+    "deps/zlib/crc32.c",
+    "deps/zlib/deflate.c",
+    "deps/zlib/infback.c",
+    "deps/zlib/inffast.c",
+    "deps/zlib/inflate.c",
+    "deps/zlib/inftrees.c",
+    "deps/zlib/trees.c",
+    "deps/zlib/zutil.c",
+};
+
 const xdiff_sources = [_][]const u8{
     "deps/xdiff/xdiffi.c",
     "deps/xdiff/xemit.c",
@@ -735,6 +544,17 @@ const xdiff_sources = [_][]const u8{
     "deps/xdiff/xpatience.c",
     "deps/xdiff/xprepare.c",
     "deps/xdiff/xutils.c",
+};
+
+const ntlm_sources = [_][]const u8{
+    // "deps/ntlmclient/crypt_commoncrypto.c",
+    // "deps/ntlmclient/crypt_openssl.c",
+    // "deps/ntlmclient/unicode_iconv.c",
+    "deps/ntlmclient/crypt_builtin_md4.c",
+    "deps/ntlmclient/crypt_mbedtls.c",
+    "deps/ntlmclient/ntlm.c",
+    "deps/ntlmclient/unicode_builtin.c",
+    "deps/ntlmclient/util.c",
 };
 
 const cli_sources = [_][]const u8{
@@ -759,4 +579,36 @@ const cli_win32_sources = [_][]const u8{
 
 const cli_unix_sources = [_][]const u8{
     "src/cli/unix/sighandler.c",
+};
+
+const example_sources = [_][]const u8{
+    "examples/add.c",
+    "examples/args.c",
+    "examples/blame.c",
+    "examples/cat-file.c",
+    "examples/checkout.c",
+    "examples/clone.c",
+    "examples/commit.c",
+    "examples/common.c",
+    "examples/config.c",
+    "examples/describe.c",
+    "examples/diff.c",
+    "examples/fetch.c",
+    "examples/for-each-ref.c",
+    "examples/general.c",
+    "examples/index-pack.c",
+    "examples/init.c",
+    "examples/lg2.c",
+    "examples/log.c",
+    "examples/ls-files.c",
+    "examples/ls-remote.c",
+    "examples/merge.c",
+    "examples/push.c",
+    "examples/remote.c",
+    "examples/rev-list.c",
+    "examples/rev-parse.c",
+    "examples/show-index.c",
+    "examples/stash.c",
+    "examples/status.c",
+    "examples/tag.c",
 };
