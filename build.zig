@@ -1,28 +1,5 @@
 const std = @import("std");
 
-// Reference CMake output:
-// -- Enabled features:
-//  * nanoseconds, support nanosecond precision file mtimes and ctimes
-//  * HTTPS, using mbedTLS
-//  * SHA1, using mbedTLS
-//  * SHA256, using mbedTLS
-//  * http-parser, http-parser support (bundled)
-//  * regex, using bundled PCRE
-//  * xdiff, xdiff support (bundled)
-//  * SSH, using libssh2
-//  * zlib, using bundled zlib
-//  * futimens, futimens support
-//  * threadsafe, threadsafe support
-//  * ntlmclient, NTLM authentication support for Unix
-
-// -- Disabled features:
-//  * SHA256 API, experimental SHA256 APIs
-//  * debugpool, debug pool allocator
-//  * debugalloc, debug strict allocators
-//  * debugopen, path validation in open
-//  * GSSAPI, GSSAPI support for SPNEGO authentication
-//  * iconv, iconv encoding conversion support
-
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -48,10 +25,10 @@ pub fn build(b: *std.Build) !void {
     });
 
     const libgit_flags = [_][]const u8{
-        // @Todo: for some reason, trying to use c90 as specified in the cmake
+        // @Todo: for some reason on linux, trying to use c90 as specified in the cmake
         // files causes compile errors relating to pthreads. Using gnu90 or the
         // default compiles, so I guess this is fine?
-        // "-std=c90",
+        "-std=c90",
         "-Wall",
         "-Wextra",
         "-Wno-missing-field-initializers",
@@ -60,6 +37,7 @@ pub fn build(b: *std.Build) !void {
             "-DGIT_DEFAULT_CERT_LOCATION=\"/etc/ssl/certs/\""
         else
             "",
+        // "-fno-sanitize=undefined",
     };
 
     if (target.result.os.tag == .windows) {
@@ -67,12 +45,21 @@ pub fn build(b: *std.Build) !void {
         lib.linkSystemLibrary("rpcrt4");
         lib.linkSystemLibrary("crypt32");
         lib.linkSystemLibrary("ole32");
+        lib.linkSystemLibrary("ws2_32");
+        lib.linkSystemLibrary("secur32");
 
         features.addValues(.{
+            .GIT_HTTPS = 1,
             .GIT_WINHTTP = 1,
+
+            .GIT_SHA1_WIN32 = 1,
+            .GIT_SHA256_WIN32 = 1,
+
             .GIT_IO_WSAPOLL = 1,
         });
-        @panic("@Todo: windows support");
+
+        lib.addWin32ResourceFile(.{ .file = b.path("src/libgit2/git2.rc") });
+        lib.addCSourceFiles(.{ .files = &util_win32_sources, .flags = &libgit_flags });
     } else {
         // mbedTLS https and SHA backend
         lib.linkSystemLibrary("mbedtls");
@@ -261,6 +248,7 @@ pub fn build(b: *std.Build) !void {
         cli.linkLibrary(lib);
         cli.addCSourceFiles(.{
             .files = &cli_sources,
+            // @Todo: see above
             // .flags = &.{"-std=c90"},
         });
 
@@ -285,7 +273,10 @@ pub fn build(b: *std.Build) !void {
         exe.addIncludePath(b.path("examples"));
         exe.addCSourceFiles(.{
             .files = &example_sources,
-            .flags = &.{"-DGIT_DEPRECATE_HARD"},
+            .flags = &.{
+                "-std=c90",
+                "-DGIT_DEPRECATE_HARD",
+            },
         });
 
         exe.addIncludePath(b.path("include"));
@@ -448,12 +439,10 @@ const util_sources = [_][]const u8{
     // "src/util/hash/builtin.c",
     // "src/util/hash/collisiondetect.c",
     // "src/util/hash/common_crypto.c",
-    "src/util/hash/mbedtls.c",
     // "src/util/hash/openssl.c",
     // "src/util/hash/rfc6234/sha224-256.c",
     // "src/util/hash/sha1dc/sha1.c",
     // "src/util/hash/sha1dc/ubc_check.c",
-    // "src/util/hash/win32.c",
     "src/util/hash.c",
     "src/util/net.c",
     "src/util/pool.c",
@@ -468,26 +457,11 @@ const util_sources = [_][]const u8{
     "src/util/strmap.c",
     "src/util/thread.c",
     "src/util/tsort.c",
-    // "src/util/unix/map.c",
-    // "src/util/unix/process.c",
-    // "src/util/unix/realpath.c",
     "src/util/utf8.c",
     "src/util/util.c",
     "src/util/varint.c",
     "src/util/vector.c",
     "src/util/wildmatch.c",
-    // "src/util/win32/dir.c",
-    // "src/util/win32/error.c",
-    // "src/util/win32/map.c",
-    // "src/util/win32/path_w32.c",
-    // "src/util/win32/posix_w32.c",
-    // "src/util/win32/precompiled.c",
-    // "src/util/win32/process.c",
-    // "src/util/win32/thread.c",
-    // "src/util/win32/utf-conv.c",
-    // "src/util/win32/w32_buffer.c",
-    // "src/util/win32/w32_leakcheck.c",
-    // "src/util/win32/w32_util.c",
     "src/util/zstream.c",
 };
 
@@ -495,7 +469,25 @@ const util_unix_sources = [_][]const u8{
     "src/util/unix/map.c",
     "src/util/unix/process.c",
     "src/util/unix/realpath.c",
+
     "src/util/hash/mbedtls.c",
+};
+
+const util_win32_sources = [_][]const u8{
+    "src/util/win32/dir.c",
+    "src/util/win32/error.c",
+    "src/util/win32/map.c",
+    "src/util/win32/path_w32.c",
+    "src/util/win32/posix_w32.c",
+    "src/util/win32/precompiled.c",
+    "src/util/win32/process.c",
+    "src/util/win32/thread.c",
+    "src/util/win32/utf-conv.c",
+    "src/util/win32/w32_buffer.c",
+    "src/util/win32/w32_leakcheck.c",
+    "src/util/win32/w32_util.c",
+
+    "src/util/hash/win32.c",
 };
 
 const pcre_sources = [_][]const u8{
