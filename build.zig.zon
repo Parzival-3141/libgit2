@@ -12,7 +12,9 @@
         "deps/pcre/",
         "deps/xdiff/",
         "deps/zlib/",
-        
+            
+        "build.zig",
+        "build.zig.zon",
         "README.md",
         "AUTHORS",
         ".HEADER",
