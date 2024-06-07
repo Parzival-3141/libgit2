@@ -28,16 +28,13 @@ pub fn build(b: *std.Build) !void {
         // @Todo: for some reason on linux, trying to use c90 as specified in the cmake
         // files causes compile errors relating to pthreads. Using gnu90 or the
         // default compiles, so I guess this is fine?
-        "-std=c90",
-        "-Wall",
-        "-Wextra",
-        "-Wno-missing-field-initializers",
+        // "-std=c90",
         "-DHAVE_CONFIG_H",
         if (target.result.os.tag != .windows)
             "-DGIT_DEFAULT_CERT_LOCATION=\"/etc/ssl/certs/\""
         else
             "",
-        // "-fno-sanitize=undefined",
+        "-fno-sanitize=undefined",
     };
 
     if (target.result.os.tag == .windows) {
@@ -274,7 +271,7 @@ pub fn build(b: *std.Build) !void {
         exe.addCSourceFiles(.{
             .files = &example_sources,
             .flags = &.{
-                "-std=c90",
+                // "-std=c90",
                 "-DGIT_DEPRECATE_HARD",
             },
         });
