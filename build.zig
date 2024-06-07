@@ -220,7 +220,7 @@ pub fn build(b: *std.Build) !void {
     lib.addCSourceFiles(.{ .files = &libgit_sources, .flags = &libgit_flags });
     lib.addCSourceFiles(.{ .files = &util_sources, .flags = &libgit_flags });
 
-    lib.installHeadersDirectory(b.path("include"), "git2", .{});
+    lib.installHeadersDirectory(b.path("include"), "", .{});
     b.installArtifact(lib);
 
     const cli_step = b.step("run-cli", "Build and run the command-line interface");
