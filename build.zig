@@ -111,20 +111,21 @@ pub fn build(b: *std.Build) !void {
 
     // Bundled dependencies
     {
-        const http_parser = b.addStaticLibrary(.{
-            .name = "http-parser",
+        const llhttp = b.addStaticLibrary(.{
+            .name = "llhttp",
             .target = target,
             .optimize = optimize,
             .link_libc = true,
         });
-        http_parser.addIncludePath(b.path("deps/http-parser"));
-        http_parser.addCSourceFile(.{
-            .file = b.path("deps/http-parser/http_parser.c"),
-            .flags = &.{"-Wimplicit-fallthrough"},
+        llhttp.addIncludePath(b.path("deps/llhttp"));
+        llhttp.addCSourceFiles(.{
+            .files = &llhttp_sources,
+            .flags = &.{ "-Wno-unused-parameter", "-Wno-missing-declarations" },
         });
 
-        lib.addIncludePath(b.path("deps/http-parser"));
-        lib.linkLibrary(http_parser);
+        lib.addIncludePath(b.path("deps/llhttp"));
+        lib.linkLibrary(llhttp);
+        features.addValues(.{ .GIT_HTTPPARSER_BUILTIN = 1 });
     }
     {
         const pcre = b.addStaticLibrary(.{
@@ -383,6 +384,7 @@ const libgit_sources = [_][]const u8{
     "src/libgit2/revert.c",
     "src/libgit2/revparse.c",
     "src/libgit2/revwalk.c",
+    "src/libgit2/settings.c",
     "src/libgit2/signature.c",
     "src/libgit2/stash.c",
     "src/libgit2/status.c",
@@ -412,6 +414,7 @@ const libgit_sources = [_][]const u8{
     "src/libgit2/transports/git.c",
     "src/libgit2/transports/http.c",
     "src/libgit2/transports/httpclient.c",
+    "src/libgit2/transports/httpparser.c",
     "src/libgit2/transports/local.c",
     "src/libgit2/transports/smart.c",
     "src/libgit2/transports/smart_pkt.c",
@@ -435,13 +438,6 @@ const util_sources = [_][]const u8{
     "src/util/filebuf.c",
     "src/util/fs_path.c",
     "src/util/futils.c",
-    // "src/util/hash/builtin.c",
-    // "src/util/hash/collisiondetect.c",
-    // "src/util/hash/common_crypto.c",
-    // "src/util/hash/openssl.c",
-    // "src/util/hash/rfc6234/sha224-256.c",
-    // "src/util/hash/sha1dc/sha1.c",
-    // "src/util/hash/sha1dc/ubc_check.c",
     "src/util/hash.c",
     "src/util/net.c",
     "src/util/pool.c",
@@ -487,6 +483,12 @@ const util_win32_sources = [_][]const u8{
     "src/util/win32/w32_util.c",
 
     "src/util/hash/win32.c",
+};
+
+const llhttp_sources = [_][]const u8{
+    "deps/llhttp/api.c",
+    "deps/llhttp/http.c",
+    "deps/llhttp/llhttp.c",
 };
 
 const pcre_sources = [_][]const u8{
@@ -538,9 +540,6 @@ const xdiff_sources = [_][]const u8{
 };
 
 const ntlm_sources = [_][]const u8{
-    // "deps/ntlmclient/crypt_commoncrypto.c",
-    // "deps/ntlmclient/crypt_openssl.c",
-    // "deps/ntlmclient/unicode_iconv.c",
     "deps/ntlmclient/crypt_builtin_md4.c",
     "deps/ntlmclient/crypt_mbedtls.c",
     "deps/ntlmclient/ntlm.c",
@@ -564,7 +563,6 @@ const cli_sources = [_][]const u8{
 };
 
 const cli_win32_sources = [_][]const u8{
-    // "src/cli/win32/precompiled.c",
     "src/cli/win32/sighandler.c",
 };
 

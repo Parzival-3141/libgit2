@@ -7,4 +7,5 @@ CMakeSettings.json
 .vs
 .idea
 
-zig-*
+zig-out
+.zig-cache
