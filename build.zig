@@ -249,12 +249,13 @@ pub fn build(b: *std.Build) !void {
             // .flags = &.{"-std=c90"},
         });
 
-        b.installArtifact(cli);
-
+        // independant install step so you can easily access the binary
+        const cli_install = b.addInstallArtifact(cli, .{});
         const cli_run = b.addRunArtifact(cli);
         if (b.args) |args| {
             for (args) |arg| cli_run.addArg(arg);
         }
+        cli_run.step.dependOn(&cli_install.step);
         cli_step.dependOn(&cli_run.step);
     }
 
@@ -279,12 +280,13 @@ pub fn build(b: *std.Build) !void {
         exe.addIncludePath(b.path("include"));
         exe.linkLibrary(lib);
 
-        b.installArtifact(exe);
-
+        // independant install step so you can easily access the binary
+        const examples_install = b.addInstallArtifact(exe, .{});
         const example_run = b.addRunArtifact(exe);
         if (b.args) |args| {
             for (args) |arg| example_run.addArg(arg);
         }
+        example_run.step.dependOn(&examples_install.step);
         examples_step.dependOn(&example_run.step);
     }
 }
