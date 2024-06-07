@@ -1,0 +1,20 @@
+.{
+    .name = "libgit2",
+    .version = "1.8.0",
+    .minimum_zig_version = "0.12.0",
+    .paths = .{
+        "src/",
+        "include/",
+        "examples/",
+        
+        "deps/http-parser/",
+        "deps/ntlmclient/",
+        "deps/pcre/",
+        "deps/xdiff/",
+        "deps/zlib/",
+        
+        "README.md",
+        "AUTHORS",
+        ".HEADER",
+    },
+}
